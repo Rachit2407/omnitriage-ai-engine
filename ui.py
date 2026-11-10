@@ -65,6 +65,7 @@ with st.sidebar:
     st.divider()
     
     st.markdown("### 📊 Live System Metrics")
+    st.markdown(f"**Active LLM Engine:** `{agent.provider_name}`")
     st.markdown(f"**Knowledge Base:** `{docs_count} Verified Docs`")
     st.markdown("**Vector Store:** `ChromaDB / Semantic Index`")
     st.markdown("**Guardrail SLA:** `< 850ms latency`")

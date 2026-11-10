@@ -2,25 +2,30 @@ import os
 from typing import Dict, Any, List
 from core.rag_engine import RAGEngine
 from core.guardrails import GuardrailAuditor
+from core.config import settings
 
 class SupportTriageAgent:
     """
     Main orchestration agent:
     1. Embeds and retrieves relevant documentation chunks.
-    2. Synthesizes a technical response with exact citations.
+    2. Synthesizes a technical response with exact citations using Groq, Gemini, or OpenAI.
     3. Runs an adversarial guardrail audit.
     4. Routes the ticket (AUTO_RESOLVE_DISPATCH vs. ESCALATE_HUMAN_TIER_2).
     """
     def __init__(self, rag: RAGEngine, auditor: GuardrailAuditor):
         self.rag = rag
         self.auditor = auditor
-        self.api_key = os.getenv("OPENAI_API_KEY", "")
+        self.provider_name, self.api_key, self.model_name, self.base_url = settings.get_provider_details()
         self.client = None
-        if self.api_key and not self.api_key.startswith("your_"):
+        if self.api_key:
             try:
                 from openai import OpenAI
-                self.client = OpenAI(api_key=self.api_key)
-            except Exception:
+                if self.base_url:
+                    self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+                else:
+                    self.client = OpenAI(api_key=self.api_key)
+            except Exception as e:
+                print(f"[SupportTriageAgent] Client initialization failed: {e}")
                 self.client = None
 
     def process_ticket(self, user_ticket: str) -> Dict[str, Any]:
@@ -40,7 +45,7 @@ class SupportTriageAgent:
             user_prompt = f"Official Knowledge Base Context:\n{context_str}\n\nCustomer Ticket:\n{user_ticket}"
             try:
                 response = self.client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model=self.model_name,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
@@ -49,6 +54,7 @@ class SupportTriageAgent:
                 )
                 drafted_reply = response.choices[0].message.content
             except Exception as e:
+                print(f"[SupportTriageAgent] LLM generation error ({self.provider_name}): {e}")
                 drafted_reply = self._generate_deterministic_reply(user_ticket, chunks)
         else:
             drafted_reply = self._generate_deterministic_reply(user_ticket, chunks)
@@ -73,50 +79,47 @@ class SupportTriageAgent:
             "recommended_action": action,
             "status": status,
             "routed_to": routed_to,
-            "citations": [c['source'] for c in chunks]
+            "citations": [c['source'] for c in chunks],
+            "provider": self.provider_name
         }
 
     def _generate_deterministic_reply(self, ticket: str, chunks: List[Dict[str, Any]]) -> str:
-        """Deterministic high-fidelity response generator for demo without API key."""
+        """Deterministic high-fidelity response generator for demo without active API key."""
         t_low = ticket.lower()
-        if "webhook" in t_low and ("retry" in t_low or "down" in t_low or "fail" in t_low):
+        if "webhook" in t_low or "retry" in t_low:
             return (
-                "Hello,\n\nOur system automatically retries failed webhook deliveries up to 5 times using an "
-                "exponential backoff schedule:\n"
-                "• Attempt 1: 5 seconds\n"
-                "• Attempt 2: 30 seconds\n"
-                "• Attempt 3: 2 minutes\n"
-                "• Attempt 4: 15 minutes\n"
-                "• Attempt 5: 1 hour\n\n"
-                "If your endpoint remains down after all 5 retries, the webhook subscription will be temporarily "
-                "disabled, and an incident alert will be sent to your account administrator. Once your service recovers, "
-                "you can manually replay failed deliveries directly from Developer Settings > Webhooks > Dead Letter Queue.\n\n"
-                "Let us know if you need assistance debugging the webhook headers!\n\n"
-                "— OmniTriage Technical Operations (Reference: docs://webhook_retries.md)"
+                "Hi there,\n\nOur system automatically retries failed webhook deliveries (any HTTP status other than 200) "
+                "up to 5 times using an exponential backoff schedule:\n"
+                "• 1st retry: 5 seconds\n"
+                "• 2nd retry: 30 seconds\n"
+                "• 3rd retry: 2 minutes\n"
+                "• 4th retry: 15 minutes\n"
+                "• 5th retry: 1 hour\n\n"
+                "If the destination endpoint does not return a 200 after all 5 retries, the webhook is automatically "
+                "paused and a notification is dispatched to your admin email address.\n\n"
+                "Reference: docs://webhook_retries.md"
             )
-        elif "secret" in t_low and ("api" in t_low or "reset" in t_low or "lost" in t_low):
+        elif "secret" in t_low or "api key" in t_low:
             return (
-                "Hi there,\n\nFor cryptographic security, OmniTriage stores only salted SHA-256 hashes of secret API keys. "
-                "As a result, our team and automated systems have zero capability to retrieve, view, or email your original secret key.\n\n"
-                "To resolve this, your administrator should:\n"
-                "1. Navigate to Settings > Developer > API Keys.\n"
-                "2. Revoke the lost key to prevent unauthorized access.\n"
-                "3. Generate a new secret key and immediately store it in your team's secret manager (e.g. AWS Secrets Manager or Doppler).\n\n"
-                "Please let us know if you need help scoping permissions on your replacement key.\n\n"
-                "— OmniTriage Security & Auth Team (Reference: docs://api_keys.md)"
+                "Hi there,\n\nFor security and compliance reasons, secret API keys are generated once and hashed with SHA-256. "
+                "They are never stored in plaintext and cannot be recovered or retrieved by any member of our team.\n\n"
+                "To restore service for your application:\n"
+                "1. Navigate to Settings > Developer Keys in your dashboard.\n"
+                "2. Generate a new secret key with the necessary scoped permissions.\n"
+                "3. Update your production environment variables.\n"
+                "4. Revoke the lost key to prevent unauthorized usage.\n\n"
+                "Reference: docs://api_keys.md"
             )
-        elif "refund" in t_low and ("downgrade" in t_low or "seat" in t_low):
+        elif "refund" in t_low or "downgrad" in t_low:
             return (
-                "Hello,\n\nWhen a team member seat is downgraded or removed, the change takes effect immediately. "
-                "Under our standard Terms of Service, the remaining unused value for that seat is converted into an account billing credit "
-                "that automatically offsets future monthly subscription invoices. We do not provide direct cash refunds for seat downgrades.\n\n"
-                "You can review your active credit balance anytime under Settings > Billing & Invoices.\n\n"
-                "— OmniTriage Billing Team (Reference: docs://billing_faqs.md)"
+                "Hi there,\n\nPer our enterprise subscription terms, seats removed mid-cycle are not eligible for direct cash refunds "
+                "back to credit cards. Instead, the unused prorated balance is automatically converted into account credits that will "
+                "apply toward your next monthly billing cycle.\n\n"
+                "Reference: docs://billing_faqs.md"
             )
         else:
             return (
-                "Hello,\n\nThank you for reaching out. Based on your inquiry, we have referenced our internal developer specifications. "
-                "To ensure you receive the most accurate resolution, we have packaged your ticket context and routed this inquiry directly "
-                "to our senior engineering team. A technical representative will follow up within our standard business SLA.\n\n"
-                "— OmniTriage Support Engine"
+                f"Thank you for reaching out. Based on our documentation:\n\n"
+                f"{chunks[0]['content'] if chunks else 'Ticket flagged for engineering review.'}\n\n"
+                "Please let us know if you have any follow-up questions."
             )
