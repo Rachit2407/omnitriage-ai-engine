@@ -1,26 +1,31 @@
-# ⚡ OmniTriage AI: Autonomous Support & Guardrailed Triage Engine
+# ⚡ OmniTriage AI: Multi-Tenant Autonomous Support & Guardrail Platform
 
-> **Production-grade RAG support resolution engine with real-time hallucination scoring and deterministic policy enforcement for B2B SaaS.**
+> **Production-grade multi-tenant B2B support triage engine with 1-click documentation ingestion, 1-line embeddable chat widget, and real-time hallucination scoring.**
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688.svg?style=flat&logo=fastapi)](https://fastapi.tiangolo.com)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.39-FF4B4B.svg?style=flat&logo=streamlit)](https://streamlit.io)
 [![Pydantic](https://img.shields.io/badge/Pydantic-v2.9-E92063.svg?style=flat&logo=pydantic)](https://docs.pydantic.dev)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat&logo=python)](https://python.org)
+[![Multi-Tenant](https://img.shields.io/badge/Multi--Tenant-Isolated-blue.svg)](#multi-tenant-architecture)
+[![Groq & Gemini](https://img.shields.io/badge/Providers-Groq%20%7C%20Gemini%20%7C%20OpenAI-orange.svg)](#multi-provider-support)
 
 ---
 
-## 🎯 The Core Business Problem
+## 🚀 Key New Capabilities
 
-High-growth B2B software companies ($1M–$10M ARR) handle hundreds of incoming technical support tickets every week. 
-Over **40% of tier-1 support inquiries** are repetitive:
-- *"What is your webhook retry interval schedule?"*
-- *"Can you recover or email our production secret API key?"*
-- *"Can we get a cash refund for seats downgraded mid-cycle?"*
-
-Standard LLM chatbots **hallucinate policies, invent non-existent refund guarantees, or attempt to disclose unrecoverable security credentials**.
-
-**OmniTriage AI solves this with an Adversarial Safety Guardrail Layer**:
-Every drafted response is audited in real-time against verified documentation chunks using structured Pydantic schemas. If confidence drops below `0.85` or a policy violation is detected, **auto-dispatch is halted and the ticket is routed directly to human tier-2 support with an enriched diagnostic summary.**
+1. 🏢 **Multi-Tenant Workspace Partitioning (Supabase / Clerk / Local)**:
+   - Any B2B SaaS founder can sign up with their email.
+   - Each tenant receives an isolated vector partition, custom API key (`ot_live_...`), and dedicated customer support queue.
+2. 🌐 **1-Click Documentation Ingestion (< 60s)**:
+   - Founders paste their public documentation URL (e.g. `https://docs.stripe.com`, `https://docs.company.com`).
+   - The built-in multi-threaded crawler extracts clean article text, semantically chunks it into ~350-word passages, and indexes it into the tenant's vector partition in under 60 seconds.
+3. 🔌 **1-Line Embeddable JavaScript Widget**:
+   - Founders embed the AI support bot into their web application with one line of JavaScript before `</body>`:
+     ```html
+     <script src="https://omnitriage-demo.streamlit.app/static/widget.js" data-tenant-id="YOUR_TENANT_ID" data-company="Your Company"></script>
+     ```
+   - Includes real-time citation badges, 0% hallucination guardrail indicators, and automatic fallback.
+4. 📢 **Slack Escalation Webhook**:
+   - Tickets requiring human intervention automatically dispatch a formatted alert to the founder's Slack channel with pre-drafted diagnostic summaries.
 
 ---
 
@@ -28,101 +33,79 @@ Every drafted response is audited in real-time against verified documentation ch
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                          OMNITRIAGE AI ARCHITECTURE                             │
+│                      OMNITRIAGE MULTI-TENANT ARCHITECTURE                       │
 │                                                                                 │
-│  [Customer Inbound Ticket]                                                      │
-│             │                                                                   │
-│             ▼                                                                   │
-│  [FastAPI / LangGraph Orchestrator]                                             │
-│             │                                                                   │
-│             ├─► [1. Query Embedding] ──► [ChromaDB / Pinecone Vector Store]     │
-│             │                                     │                             │
-│             │                                     ▼                             │
-│             │                          [Relevant Doc Chunks]                    │
-│             │                                     │                             │
-│             ├─► [2. LLM Synthesis with Exact Citations]                         │
-│             │                                     │                             │
-│             ▼                                     ▼                             │
-│  [3. Guardrail Auditor] ◄─────────────────────────┘                             │
-│     • Check Confidence Score (> 0.85)                                           │
-│     • Hallucination Verification vs Docs                                        │
-│     • Cryptographic & Policy Compliance Filter                                  │
-│             │                                                                   │
-│             ├───► [PASS] ──► Auto-Reply to Customer with Doc Deep Links         │
-│             │                                                                   │
-│             └───► [FAIL] ──► Escalate to Tier-2 Queue with Formatted JSON       │
+│   [Founder Portal] ──► [1-Click Doc Crawler] ──► [Tenant-Isolated Vector Store] │
+│                                                                │                │
+│   [Customer Inbound / 1-Line Embed Widget / Slack]             │                │
+│                        │                                       │                │
+│                        ▼                                       ▼                │
+│            [FastAPI / Tenant Middleware] ────────► [Tenant-Specific Context]    │
+│                        │                                       │                │
+│                        ▼                                       ▼                │
+│            [Groq / Gemini / OpenAI Synthesis] ◄────────────────┘                │
+│                        │                                                        │
+│                        ▼                                                        │
+│            [Pydantic Guardrail Auditor]                                         │
+│               • Confidence Score (> 0.85)                                       │
+│               • Hallucination Verification vs Docs                              │
+│               • Cryptographic / Policy Compliance                               │
+│                        │                                                        │
+│             ┌──────────┴──────────┐                                             │
+│             ▼                     ▼                                             │
+│     [PASS: Confidence > 85%]  [FAIL / Ungrounded Policy]                        │
+│     Auto-Resolve Customer     Escalate to Human Queue + Slack Webhook Alert     │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🚀 Quickstart & Local Setup
+## 📦 Quickstart & Running Locally
 
-### 1. Clone & Navigate
+### 1. Clone & Install Dependencies
 ```bash
-git clone https://github.com/[your-username]/omnitriage-ai-engine.git
+git clone https://github.com/Rachit2407/omnitriage-ai-engine.git
 cd omnitriage-ai-engine
-```
-
-### 2. Install Dependencies
-```bash
 pip install -r requirements.txt
 ```
 
-### 3. Configure Environment
-```bash
-cp .env.example .env
-# Edit .env and insert your OPENAI_API_KEY (optional for local deterministic demo)
+### 2. Configure Environment (Groq, Gemini, or OpenAI)
+Create `.env` using `.env.example`:
+```env
+# Free tier Groq key (https://console.groq.com)
+GROQ_API_KEY=gsk_your_groq_key
+
+# Or free tier Gemini key (https://aistudio.google.com)
+# GEMINI_API_KEY=AIzaSy_your_key
+
+PORT=8000
 ```
 
-### 4. Launch Interactive Demo (Streamlit)
+### 3. Launch Dashboard & API
 ```bash
+# Launch Multi-Tenant Streamlit Dashboard
 streamlit run ui.py
-```
-*Access the interactive testing workbench at `http://localhost:8501`.*
 
-### 5. Launch Production API (FastAPI)
-```bash
+# Or launch FastAPI Webhook / Widget Server
 python app.py
-# or: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
-```
-*Access interactive Swagger API docs at `http://localhost:8000/docs`.*
-
----
-
-## 📡 API Usage Example (Webhook Ingestion)
-
-### Request:
-```bash
-curl -X POST "http://localhost:8000/api/v1/triage" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ticket_id": "TCK-8921",
-    "customer_email": "cto@acmefinance.io",
-    "message_text": "Our webhook receiver was offline. What is your automatic retry schedule before disabling the endpoint?"
-  }'
-```
-
-### Response (200 OK):
-```json
-{
-  "ticket_id": "TCK-8921",
-  "status": "RESOLVED",
-  "action": "AUTO_RESOLVE_SENT",
-  "routed_to": "Customer Inbox (Automated SLA < 2s)",
-  "confidence_score": 0.98,
-  "reply_body": "Hello,\n\nOur system automatically retries failed webhook deliveries up to 5 times using an exponential backoff schedule: 5s, 30s, 2m, 15m, and 1 hour...",
-  "citations": [
-    "docs://webhook_retries.md"
-  ]
-}
 ```
 
 ---
 
-## 💼 Turnkey Deployment for B2B SaaS
+## 📡 REST API Reference
 
-Need this exact pipeline deployed into your existing Zendesk, Intercom, or Slack workflows?
-- **Delivery Time:** 5 to 7 business days
-- **Scope:** Custom documentation vector ingestion, CRM webhook middleware, brand tone calibration, staging validation suite.
-- **Book Technical Audit:** [Schedule 15-min Architecture Sync](https://cal.com)
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/api/v1/auth/signup` | `POST` | Register a new SaaS founder & provision tenant API key |
+| `/api/v1/auth/login` | `POST` | Authenticate founder and retrieve workspace credentials |
+| `/api/v1/tenants/ingest-docs` | `POST` | 1-Click crawl & index public documentation in < 60s |
+| `/api/v1/triage` | `POST` | Ingest ticket, run tenant RAG + Guardrails, and return verdict |
+| `/api/v1/webhook/slack` | `POST` | Slack interactive webhook & event handler |
+| `/widget/preview` | `GET` | Live interactive browser preview of the embeddable chat widget |
+
+---
+
+## 🛡️ Guardrail Guarantees
+- **0% Hallucinated Policies**: If documentation does not support an action (e.g. recovering lost secret keys, granting unentitled refunds), auto-dispatch is halted.
+- **Strict SLA**: Confidence threshold strictly set to `0.85`.
+- **Tenant Isolation**: Inbound tickets query ONLY the documentation partition belonging to that tenant.

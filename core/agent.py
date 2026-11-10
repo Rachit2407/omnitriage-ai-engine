@@ -1,16 +1,18 @@
 import os
-from typing import Dict, Any, List
+import requests
+from typing import Dict, Any, List, Optional
 from core.rag_engine import RAGEngine
 from core.guardrails import GuardrailAuditor
 from core.config import settings
 
 class SupportTriageAgent:
     """
-    Main orchestration agent:
-    1. Embeds and retrieves relevant documentation chunks.
-    2. Synthesizes a technical response with exact citations using Groq, Gemini, or OpenAI.
-    3. Runs an adversarial guardrail audit.
-    4. Routes the ticket (AUTO_RESOLVE_DISPATCH vs. ESCALATE_HUMAN_TIER_2).
+    Tenant-Aware Autonomous Triage Agent:
+    1. Embeds and retrieves documentation chunks isolated to the specific tenant.
+    2. Synthesizes a technical response with exact documentation citations.
+    3. Runs an adversarial guardrail audit (hallucination & policy check).
+    4. Routes the ticket (AUTO_RESOLVE_SENT vs. ESCALATE_TO_HUMAN_TIER_2).
+    5. Dispatches real-time Slack escalation alerts when webhooks are connected.
     """
     def __init__(self, rag: RAGEngine, auditor: GuardrailAuditor):
         self.rag = rag
@@ -28,21 +30,27 @@ class SupportTriageAgent:
                 print(f"[SupportTriageAgent] Client initialization failed: {e}")
                 self.client = None
 
-    def process_ticket(self, user_ticket: str) -> Dict[str, Any]:
-        # Step 1: Context Retrieval via RAG
-        chunks = self.rag.retrieve_context(user_ticket, top_k=2)
+    def process_ticket(
+        self,
+        user_ticket: str,
+        tenant_id: str = "tenant_default_demo",
+        tenant_name: str = "Acme Developer Platform",
+        slack_webhook_url: Optional[str] = None
+    ) -> Dict[str, Any]:
+        # Step 1: Context Retrieval isolated to tenant's knowledge base
+        chunks = self.rag.retrieve_context(user_ticket, tenant_id=tenant_id, top_k=2)
         context_str = "\n\n".join([f"Source ({c['source']}) - {c.get('title', '')}:\n{c['content']}" for c in chunks])
 
         # Step 2: Synthesis
-        if self.client:
+        if self.client and context_str.strip():
             system_prompt = (
-                "You are an Elite Technical Support Engineer at a high-growth B2B developer platform. "
+                f"You are the Lead Technical Support AI for {tenant_name}. "
                 "Resolve the customer's inquiry with extreme precision, citing exact documentation rules. "
-                "Never invent policies or promise features not explicitly backed by the provided documentation. "
-                "If the documentation does not permit an action (e.g. retrieving secret keys), politely explain "
-                "the security policy and guide the user through the standard self-service procedure."
+                "Never invent policies, parameters, or features not explicitly backed by the provided documentation. "
+                "If the documentation does not permit an action or if context is missing, explain the policy "
+                "clearly and politely inform the user that the request is flagged for senior engineering review."
             )
-            user_prompt = f"Official Knowledge Base Context:\n{context_str}\n\nCustomer Ticket:\n{user_ticket}"
+            user_prompt = f"Official Knowledge Base Context:\n{context_str}\n\nCustomer Support Ticket:\n{user_ticket}"
             try:
                 response = self.client.chat.completions.create(
                     model=self.model_name,
@@ -62,7 +70,7 @@ class SupportTriageAgent:
         # Step 3: Adversarial Guardrail Audit
         verdict = self.auditor.audit_response(user_ticket, context_str, drafted_reply)
 
-        # Step 4: Decision Routing
+        # Step 4: Decision Routing & SLA Assignment
         if verdict.can_safely_send:
             action = "AUTO_RESOLVE_SENT"
             status = "RESOLVED"
@@ -70,10 +78,22 @@ class SupportTriageAgent:
         else:
             action = "ESCALATE_TO_HUMAN_TIER_2"
             status = "HUMAN_TRIAGE_REQUIRED"
-            routed_to = "Senior Support Queue (Zendesk Priority Tag)"
+            routed_to = f"{tenant_name} Senior Engineering Queue (High Priority)"
+
+            # Step 5: Optional Slack Escalation Webhook Dispatch
+            if slack_webhook_url:
+                self._dispatch_slack_alert(
+                    webhook_url=slack_webhook_url,
+                    ticket=user_ticket,
+                    verdict=verdict.model_dump(),
+                    drafted_reply=drafted_reply,
+                    tenant_name=tenant_name
+                )
 
         return {
             "ticket": user_ticket,
+            "tenant_id": tenant_id,
+            "tenant_name": tenant_name,
             "drafted_reply": drafted_reply,
             "verdict": verdict.model_dump(),
             "recommended_action": action,
@@ -83,8 +103,50 @@ class SupportTriageAgent:
             "provider": self.provider_name
         }
 
+    def _dispatch_slack_alert(
+        self,
+        webhook_url: str,
+        ticket: str,
+        verdict: Dict[str, Any],
+        drafted_reply: str,
+        tenant_name: str
+    ):
+        """Dispatches rich Slack block kit alert for tickets requiring human attention."""
+        try:
+            payload = {
+                "text": f"🚨 OmniTriage Escalation: {tenant_name} Support Queue",
+                "blocks": [
+                    {
+                        "type": "header",
+                        "text": {"type": "plain_text", "text": "🚨 Human Escalation Required", "emoji": True}
+                    },
+                    {
+                        "type": "section",
+                        "fields": [
+                            {"type": "mrkdwn", "text": f"*Company:* {tenant_name}"},
+                            {"type": "mrkdwn", "text": f"*Confidence:* {verdict.get('confidence_score', 0)*100:.1f}%"}
+                        ]
+                    },
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": f"*Customer Ticket:*\n> {ticket}"}
+                    },
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": f"*Guardrail Flag Reason:*\n_{verdict.get('reasoning')}_"}
+                    },
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": f"*Pre-Drafted Diagnostic Summary:*\n```{drafted_reply[:400]}...```"}
+                    }
+                ]
+            }
+            requests.post(webhook_url, json=payload, timeout=3)
+        except Exception as e:
+            print(f"[SupportTriageAgent] Slack dispatch error: {e}")
+
     def _generate_deterministic_reply(self, ticket: str, chunks: List[Dict[str, Any]]) -> str:
-        """Deterministic high-fidelity response generator for demo without active API key."""
+        """Deterministic high-fidelity response generator for fallback or testing."""
         t_low = ticket.lower()
         if "webhook" in t_low or "retry" in t_low:
             return (
@@ -117,9 +179,14 @@ class SupportTriageAgent:
                 "apply toward your next monthly billing cycle.\n\n"
                 "Reference: docs://billing_faqs.md"
             )
+        elif chunks:
+            return (
+                f"Thank you for contacting support. Based on our verified documentation:\n\n"
+                f"{chunks[0]['content'][:600]}\n\n"
+                f"Source: {chunks[0]['source']}"
+            )
         else:
             return (
-                f"Thank you for reaching out. Based on our documentation:\n\n"
-                f"{chunks[0]['content'] if chunks else 'Ticket flagged for engineering review.'}\n\n"
-                "Please let us know if you have any follow-up questions."
+                "Thank you for your inquiry. This specific question requires verification with our engineering team. "
+                "I have flagged this ticket with high priority for a specialist to review."
             )

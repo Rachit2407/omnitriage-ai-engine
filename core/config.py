@@ -5,12 +5,23 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Settings:
+    # LLM API Keys
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
     
+    # Multi-Tenant Auth Settings (Supabase / Clerk / Local)
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+    SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")
+    SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    JWT_SECRET: str = os.getenv("JWT_SECRET", "omnitriage-production-secret-key-2026")
+    
+    # Storage & Thresholds
     CONFIDENCE_THRESHOLD: float = 0.85
-    CHROMA_PERSIST_DIR: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "chroma_db")
+    BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    DATA_DIR: str = os.path.join(BASE_DIR, "data")
+    CHROMA_PERSIST_DIR: str = os.path.join(DATA_DIR, "chroma_db")
+    TENANT_DB_PATH: str = os.path.join(DATA_DIR, "tenants.db")
 
     @classmethod
     def get_provider_details(cls) -> Tuple[str, Optional[str], str, Optional[str]]:
